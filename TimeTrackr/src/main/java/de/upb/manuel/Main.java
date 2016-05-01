@@ -32,14 +32,14 @@ public class Main extends JFrame
 	 */
 	private static final long				serialVersionUID	= 3080797911952478607L;
 
-	private static final String				tableRowTemplate	= "<tr>\n"
-																		+ "<td>%s</td>\n"
-																		+ "<td>%s</td>\n"
-																		+ "<td>%s</td>\n"
-																		+ "</tr>";
-	private static final DateTimeFormatter	dateFormatter		= DateTimeFormatter.ISO_DATE;
+	public static final DateTimeFormatter	dateFormatter		= DateTimeFormatter.ISO_DATE;
 	boolean									taskRunning			= false;
 	TemporalField							dayOfWeek			= WeekFields.of(Locale.GERMANY).dayOfWeek();
+
+	private static enum Parserstate
+	{
+		Header, Date, Hours, Description
+	}
 
 	public static void main(String[] args) throws IOException
 	{
@@ -86,7 +86,7 @@ public class Main extends JFrame
 		String fileNameForThisWeek = String.format("calendar-week-%02d.md", weekOfYear);
 		Path timeSheet = Paths.get(pathToTimeSheetsFolder, fileNameForThisWeek);
 		List<String> header = new ArrayList<>();
-		List<String> table = new ArrayList<>();
+		List<TableRowData> tableData = new ArrayList<>();
 		String name = null;
 		if (props.containsKey("name"))
 		{
@@ -121,17 +121,46 @@ public class Main extends JFrame
 				}
 			}
 			saveProps(props);
-			table.add(line);
+			Parserstate state = Parserstate.Header;
+			String dateString = "1970-01-01";
+			String description = "";
+			String hoursString = "00:00";
 			while (!(line = contents.get(i++)).equals("</table>"))
 			{
-				table.add(line);
+				line = line.trim();
+				switch (state) {
+				case Date:
+					if (line.startsWith("<td>"))
+					{
+						dateString = line.replace("<td>", "").replace("</td>", "");
+						state = Parserstate.Hours;
+					}
+					break;
+				case Description:
+					if (line.startsWith("<td>"))
+					{
+						description = line.replace("<td>", "").replace("</td>", "");
+						state = Parserstate.Date;
+						tableData.add(new TableRowData(dateString, hoursString, description));
+					}
+					break;
+				case Header:
+					if (line.equals("</tr>"))
+					{
+						state = Parserstate.Date;
+					}
+					break;
+				case Hours:
+					if (line.startsWith("<td>"))
+					{
+						hoursString = line.replace("<td>", "").replace("</td>", "");
+						state = Parserstate.Description;
+					}
+					break;
+				default:
+					break;
+				}
 			}
-			table.add(line);
-			System.out.println("Header:");
-			System.out.println(header.stream().collect(Collectors.joining("\n")));
-
-			System.out.println("Table:");
-			System.out.println(table.stream().collect(Collectors.joining("\n")));
 		}
 		else
 		{
@@ -143,14 +172,6 @@ public class Main extends JFrame
 			header.add(String.format("Dates: %s - %s", dateFormatter.format(LocalDate.now().with(dayOfWeek, 1)),
 					dateFormatter.format(LocalDate.now().with(dayOfWeek, 7))));
 			header.add("");
-
-			table.add("<table>");
-			table.add("<tr>");
-			table.add("<td><strong>Date</strong></td>");
-			table.add("<td><strong>Hours</strong></td>");
-			table.add("<td><strong>Description</strong></td>");
-			table.add("</tr>");
-			table.add("</table>");
 		}
 
 		JButton startStopButton = new JButton("Start Activity");
@@ -194,18 +215,22 @@ public class Main extends JFrame
 						e1.printStackTrace();
 					}
 					long seconds = (System.currentTimeMillis() - startTimeStamp) / 1000;
-					String durationString = String.format("%02d:%02d", seconds / 3600, (seconds % 3600) / 60);
 
-					String newRow = String.format(tableRowTemplate, dateFormatter.format(LocalDate.now()), durationString, description);
-					table.add(table.size() - 1, newRow);
+					TableRowData trd = new TableRowData(LocalDate.now(), seconds, description);
+					tableData.add(trd);
 					startStopButton.setText("Start Activity");
-					saveToFile(header, table, timeSheet);
+					saveToFile(header, tableData, timeSheet);
 					description = "";
 					setTitle(title);
 				}
 			}
 
 		});
+		JButton showDetailsButton = new JButton("Show Editor");
+		showDetailsButton.addActionListener(l -> new DetailView(tableData, this)
+				.setConfirmationHandler(c -> saveToFile(header, tableData, timeSheet)));
+		add(showDetailsButton, BorderLayout.SOUTH);
+
 		setDefaultCloseOperation(EXIT_ON_CLOSE);
 		setSize(500, 500);
 		setVisible(true);
@@ -226,11 +251,18 @@ public class Main extends JFrame
 		return props;
 	}
 
-	private void saveToFile(List<String> header, List<String> table, Path timeSheet)
+	private void saveToFile(List<String> header, List<TableRowData> table, Path timeSheet)
 	{
 		List<String> lines = new ArrayList<>();
 		lines.addAll(header);
-		lines.addAll(table);
+		lines.add("<table>");
+		lines.add("<tr>");
+		lines.add("<td><strong>Date</strong></td>");
+		lines.add("<td><strong>Hours</strong></td>");
+		lines.add("<td><strong>Description</strong></td>");
+		lines.add("</tr>");
+		lines.addAll(table.stream().map(x -> x.toString()).collect(Collectors.toList()));
+		lines.add("</table>");
 		try
 		{
 			Files.write(timeSheet, lines);
