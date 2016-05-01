@@ -17,7 +17,10 @@ public class TableModel extends AbstractTableModel
 	 * 
 	 */
 	private static final long				serialVersionUID	= -7426082161207665014L;
-	private final static ImageIcon			deleteIcon			= new ImageIcon("images/delete.png");
+
+	private final ImageIcon					deleteIcon			= new ImageIcon(
+																		getClass().getClassLoader()
+																				.getResource("delete.png"));
 
 	private List<TableRowData>				original;
 
